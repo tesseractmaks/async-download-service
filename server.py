@@ -2,8 +2,6 @@ import argparse
 import asyncio
 import logging
 import os
-import shlex
-import subprocess
 
 import aiohttp
 import aiofiles
@@ -79,19 +77,9 @@ async def archive(request):
             if process.stdout.at_eof():
                 logging.warning(f'-- Success --')
                 return response
-    # TODO здесь перестало реагировать на остановку загрузки файла или загрузку страницы. Не видит остановку от браузера
     except(asyncio.CancelledError, ClientConnectionError):
         logging.warning(f'Download was interrupted')
-
-        command_str = "lsof -ti :8080"
-        command = shlex.split(command_str)
-        result = subprocess.run(command, capture_output=True)
-        stdout = result.stdout.decode()
-        try:
-            for pid in stdout.split('\n'):
-                os.kill(int(pid), 15)
-        except ValueError:
-            pass
+        process.kill()
     finally:
         return response
 
@@ -103,7 +91,6 @@ async def handle_index_page(request):
 
 
 if __name__ == '__main__':
-    port = 8080
     app = web.Application()
     app.add_routes(
         [
@@ -111,17 +98,4 @@ if __name__ == '__main__':
             web.get('/archive/{archive_hash}/', archive),
         ]
     )
-    try:
-        web.run_app(app, port=port)
-    except (OSError, TypeError, SystemExit, IndexError) as exc:
-
-        command_str = "lsof -ti :8080"
-        command = shlex.split(command_str)
-        result = subprocess.run(command, capture_output=True)
-        stdout = result.stdout.decode()
-        try:
-            for pid in stdout.split('\n'):
-                os.kill(int(pid), 15)
-        except ValueError:
-            print('-----------')
-            pass
+    web.run_app(app)
