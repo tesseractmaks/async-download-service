@@ -10,19 +10,17 @@ from dotenv import load_dotenv
 from aiohttp import web, ClientConnectionError
 
 load_dotenv()
-INTERVAL_SECS = os.getenv("DELAY")
-PATH = os.path.abspath(os.getcwd())
 logging.basicConfig(level=logging.WARNING)
 
 
-def get_arguments(PATH, INTERVAL_SECS):
+def get_arguments(path, internal_secs):
     parser = argparse.ArgumentParser(
         description='The code add directory into archive.'
     )
     parser.add_argument(
         '-p',
         '--path',
-        default=PATH,
+        default=path,
         type=str,
         help="Set path to catalog use arguments: '-p or --path'"
     )
@@ -36,48 +34,48 @@ def get_arguments(PATH, INTERVAL_SECS):
     parser.add_argument(
         '-d',
         '--delay',
-        default=INTERVAL_SECS,
+        default=internal_secs,
         type=int,
         help="Enable delay use arguments: '-d or --delay' set number"
     )
 
     args = parser.parse_args()
     if args.path:
-        PATH = args.path
+        path = args.path
     if args.logging:
         logging.disable(logging.WARNING)
     if args.path:
-        INTERVAL_SECS = args.delay
-    return PATH, int(INTERVAL_SECS)
-
-
-PATH, INTERVAL_SECS = get_arguments(PATH, int(INTERVAL_SECS))
+        internal_secs = args.delay
+    return path, int(internal_secs)
 
 
 async def archive(request):
-    name = request.match_info.get('archive_hash', "Anonymous")
-    current = os.path.dirname(f"./test_photos/{name}/")
+    internal_secs = os.getenv("DELAY")
+    path = os.path.abspath(os.getcwd())
+    path, internal_secs = get_arguments(path, int(internal_secs))
+    archive_hash = request.match_info['archive_hash']
+    current = os.path.dirname(f"./test_photos/{archive_hash}/")
     if not os.path.exists(current):
         raise aiohttp.web.HTTPNotFound(text=f"404 Not Found\n\nFileNotFound path not correct: {current}")
 
+    process = await asyncio.create_subprocess_exec(
+        "zip", f"{path}/photos", "-r", "./",
+        f"./test_photos/{archive_hash}/",
+        stdout=asyncio.subprocess.PIPE, cwd=current
+    )
+    response = web.StreamResponse()
+    response.headers['Content-Type'] = 'text/html'
     try:
-        process = await asyncio.create_subprocess_exec(
-            "zip", f"{PATH}/photos", "-r", "./",
-            f"./test_photos/{name}/",
-            stdout=asyncio.subprocess.PIPE, cwd=current
-        )
-        response = web.StreamResponse()
-        response.headers['Content-Type'] = 'text/html'
-
-        while True:
+        while process.stdout.at_eof():
             await process.stdout.read(100 * 1024)
             logging.warning(f'Sending archive chunk...')
-            await asyncio.sleep(int(INTERVAL_SECS))
-
-            if process.stdout.at_eof():
-                logging.warning(f'-- Success --')
-                return response
-    except(asyncio.CancelledError, ClientConnectionError):
+            await asyncio.sleep(int(internal_secs))
+        logging.warning(f'-- Success --')
+    except asyncio.CancelledError:
+        logging.warning(f'Download was interrupted')
+        process.kill()
+        raise
+    except(ClientConnectionError, SystemExit, Exception, KeyboardInterrupt):
         logging.warning(f'Download was interrupted')
         process.kill()
     finally:
