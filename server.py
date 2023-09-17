@@ -50,9 +50,6 @@ def get_arguments(path, internal_secs):
 
 
 async def archive(request):
-    internal_secs = os.getenv("DELAY")
-    path = os.path.abspath(os.getcwd())
-    path, internal_secs = get_arguments(path, int(internal_secs))
     archive_hash = request.match_info['archive_hash']
     current = os.path.dirname(f"./test_photos/{archive_hash}/")
     if not os.path.exists(current):
@@ -71,14 +68,13 @@ async def archive(request):
             logging.warning(f'Sending archive chunk...')
             await asyncio.sleep(int(internal_secs))
         logging.warning(f'-- Success --')
-    except asyncio.CancelledError:
-        logging.warning(f'Download was interrupted')
-        process.kill()
+    except(asyncio.CancelledError, ClientConnectionError, SystemExit, Exception, KeyboardInterrupt):
         raise
-    except(ClientConnectionError, SystemExit, Exception, KeyboardInterrupt):
-        logging.warning(f'Download was interrupted')
-        process.kill()
     finally:
+        logging.warning(f'Download was interrupted')
+        if process.returncode:
+            process.kill()
+            await process.communicate()
         return response
 
 
@@ -89,6 +85,9 @@ async def handle_index_page(request):
 
 
 if __name__ == '__main__':
+    internal_secs = os.getenv("DELAY")
+    path = os.path.abspath(os.getcwd())
+    path, internal_secs = get_arguments(path, int(internal_secs))
     app = web.Application()
     app.add_routes(
         [
